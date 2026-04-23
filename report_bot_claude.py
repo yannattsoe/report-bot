@@ -1,5 +1,5 @@
 """
-Daily Report Telegram Bot (Gemini Free Version - Railway Ready)
+Daily Report Telegram Bot (Claude API Version - Railway Ready)
 """
 
 import logging
@@ -8,7 +8,7 @@ import os
 from datetime import datetime, time
 from collections import defaultdict
 
-import google.generativeai as genai
+import anthropic
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -20,7 +20,7 @@ from telegram.ext import (
 
 # ==================== CONFIG (Environment Variables) ====================
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 OWNER_TELEGRAM_ID = int(os.environ.get("OWNER_TELEGRAM_ID"))
 
 SUMMARY_HOUR = 18
@@ -33,8 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 daily_reports: dict[str, list] = defaultdict(list)
 
@@ -86,7 +85,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ==================== GEMINI SUMMARY ====================
+# ==================== CLAUDE SUMMARY ====================
 
 async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now().strftime("%Y-%m-%d")
@@ -131,8 +130,18 @@ REPORTS:
 {report_text}"""
 
     try:
-        response = gemini_model.generate_content(prompt)
-        summary = response.text
+        response = claude_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        )
+
+        summary = response.content[0].text
 
         max_len = 4000
         if len(summary) <= max_len:
@@ -153,7 +162,7 @@ REPORTS:
         logger.info(f"Summary sent to owner for {today}")
 
     except Exception as e:
-        logger.error(f"Gemini API error: {e}")
+        logger.error(f"Claude API error: {e}")
         await context.bot.send_message(
             chat_id=OWNER_TELEGRAM_ID,
             text=f"❌ Summary error: {str(e)}\n\nRaw reports:\n{report_text[:3000]}"
