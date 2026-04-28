@@ -1,3 +1,7 @@
+analytics.get("orders_received", []),
+analytics.get("payments_collected", []),
+analytics.get("pending_followup", []),
+analytics.get("issues", ""),
 """
 Daily Report Bot - Full Version
 - Multi-group support (Production, Front Office, Designer)
@@ -87,34 +91,16 @@ def save_analytics(date, group_type, operator, jobs_completed, jobs_pending, err
         }.get(group_type, "Production_Analytics")
 
         ws = sheet.worksheet(sheet_name)
-        if group_type == "production":
-            ws.append_row([
-                date, operator,
-                json.dumps(jobs_completed, ensure_ascii=False),
-                json.dumps(jobs_pending, ensure_ascii=False),
-                json.dumps(errors, ensure_ascii=False),
-                machine_issues,
-                json.dumps(job_types, ensure_ascii=False),
-                datetime.now().strftime("%Y-%m-%d %H:%M")
-            ])
-        elif group_type == "front_office":
-            ws.append_row([
-                date, operator,
-                json.dumps(jobs_completed, ensure_ascii=False),
-                json.dumps(jobs_pending, ensure_ascii=False),
-                json.dumps(errors, ensure_ascii=False),
-                machine_issues,
-                datetime.now().strftime("%Y-%m-%d %H:%M")
-            ])
-        else:
-            ws.append_row([
-                date, operator,
-                json.dumps(jobs_completed, ensure_ascii=False),
-                json.dumps(jobs_pending, ensure_ascii=False),
-                json.dumps(errors, ensure_ascii=False),
-                machine_issues,
-                datetime.now().strftime("%Y-%m-%d %H:%M")
-            ])
+        ws.append_row([
+            date,
+            operator,
+            json.dumps(jobs_completed, ensure_ascii=False),
+            json.dumps(jobs_pending, ensure_ascii=False),
+            json.dumps(errors, ensure_ascii=False),
+            machine_issues,
+            json.dumps(job_types, ensure_ascii=False),
+            datetime.now().strftime("%Y-%m-%d %H:%M")
+        ])
     except Exception as e:
         logger.error(f"Save analytics error: {e}")
 
