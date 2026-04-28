@@ -337,37 +337,7 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "time": report_time
     })
 
-    # Gemini နဲ့ analytics ထုတ်ပြီး Sheet မှာ သိမ်မယ်
-    analytics = extract_analytics_from_report(msg.text, group_type)
-    if analytics:
-        operator = analytics.get("operator", user_name)
-        if group_type == "production":
-            save_analytics(
-                today, group_type, operator,
-                analytics.get("jobs_completed", []),
-                analytics.get("jobs_pending", []),
-                analytics.get("errors", []),
-                analytics.get("machine_issues", ""),
-                analytics.get("job_types", [])
-            )
-        elif group_type == "front_office":
-            save_analytics(
-                today, group_type, operator,
-                analytics.get("orders_received", []),
-                analytics.get("payments_collected", []),
-                analytics.get("pending_followup", []),
-                analytics.get("issues", ""),
-                []
-            )
-        else:
-            save_analytics(
-                today, group_type, operator,
-                analytics.get("designs_completed", []),
-                analytics.get("designs_pending", []),
-                analytics.get("revisions", []),
-                "",
-                analytics.get("priority_tomorrow", [])
-            )
+    # Analytics ကို summary အချိန်မှာပဲ လုပ်မယ် (quota သက်သာဖို့)
 
     logger.info(f"Report collected from {user_name} ({group_type}) at {report_time}")
 
