@@ -174,7 +174,7 @@ JSON ပဲ ထုတ်ပေးပါ၊ တခြားစကား မထည
 Report:
 {report_text}"""
 
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
         text = response.text.strip()
         # JSON ထုတ်မယ်
         text = re.sub(r'```json|```', '', text).strip()
@@ -222,7 +222,7 @@ def generate_daily_summary(reports_by_group, date):
 ---
 {report_text}"""
 
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
         return response.text
     except Exception as e:
         logger.error(f"Daily summary error: {e}")
@@ -275,7 +275,7 @@ FRONT OFFICE DATA:
 DESIGN DATA:
 {json.dumps(design_data, ensure_ascii=False, indent=2)}"""
 
-        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
         return response.text
     except Exception as e:
         logger.error(f"Weekly summary error: {e}")
