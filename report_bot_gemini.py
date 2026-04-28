@@ -167,12 +167,14 @@ Report:
 JSON ပဲ ထုတ်ပေးပါ၊ တခြားစကား မထည့်နဲ့။
 
 {{
-  "operator": "နာမည်",
-  "orders_received": ["order1"],
-  "payments_collected": ["customer - amount"],
-  "pending_followup": ["customer1"],
-  "issues": "မရှိပါ"
+  "operator": "name of the person who wrote this report",
+  "orders_received": ["extract each order: customer name, job type, size, quantity"],
+  "payments_collected": ["extract each payment: customer name and amount"],
+  "pending_followup": ["customers that need follow up tomorrow"],
+  "issues": "any problems mentioned, or မရှိပါ if none"
 }}
+
+Important: Extract ALL items found in the report. Do not return empty arrays if data exists.
 
 Report:
 {report_text}"""
