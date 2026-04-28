@@ -16,7 +16,7 @@ from datetime import datetime, time
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 
-import google.generativeai as genai
+from google import genai
 import gspread
 from google.oauth2.service_account import Credentials
 from telegram import Update
@@ -57,8 +57,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-genai.configure(api_key=GEMINI_API_KEY)
-gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+client = genai.Client(api_key=GEMINI_API_KEY)
+
 
 # In-memory report storage
 daily_reports = defaultdict(lambda: defaultdict(list))
@@ -174,7 +174,7 @@ JSON ပဲ ထုတ်ပေးပါ၊ တခြားစကား မထည
 Report:
 {report_text}"""
 
-        response = gemini_model.generate_content(prompt)
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         text = response.text.strip()
         # JSON ထုတ်မယ်
         text = re.sub(r'```json|```', '', text).strip()
@@ -222,7 +222,7 @@ def generate_daily_summary(reports_by_group, date):
 ---
 {report_text}"""
 
-        response = gemini_model.generate_content(prompt)
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         return response.text
     except Exception as e:
         logger.error(f"Daily summary error: {e}")
@@ -275,7 +275,7 @@ FRONT OFFICE DATA:
 DESIGN DATA:
 {json.dumps(design_data, ensure_ascii=False, indent=2)}"""
 
-        response = gemini_model.generate_content(prompt)
+        response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
         return response.text
     except Exception as e:
         logger.error(f"Weekly summary error: {e}")
