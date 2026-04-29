@@ -383,6 +383,82 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+
+async def cmd_monthly(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_TELEGRAM_ID:
+        await update.message.reply_text("❌ Permission မရှိပါ")
+        return
+
+    await update.message.reply_text("⏳ Monthly report လုပ်နေပြီ...")
+
+    now = datetime.now(MYANMAR_TZ)
+    year = now.year
+    month = now.month
+
+    try:
+        creds = Credentials.from_service_account_info(
+            json.loads(GOOGLE_CREDENTIALS_JSON),
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(SPREADSHEET_ID)
+
+        all_data = {}
+        for group, tab in [("production", "Production_Analytics"), ("front_office", "FrontOffice_Analytics"), ("designer", "Design_Analytics")]:
+            try:
+                ws = sheet.worksheet(tab)
+                records = ws.get_all_records()
+                monthly = [r for r in records if str(r.get("Date", "")).startswith(f"{year}-{month:02d}")]
+                all_data[group] = monthly
+            except Exception as e:
+                all_data[group] = []
+
+        prompt = f"""အောက်က {year} ခုနှစ် {month} လ data တွေကို ကြည့်ပြီး monthly performance report ရေးပေးပါ။ Myanmar language နဲ့ ရေးပါ။
+
+Production Data: {json.dumps(all_data.get('production', []), ensure_ascii=False)}
+Front Office Data: {json.dumps(all_data.get('front_office', []), ensure_ascii=False)}
+Designer Data: {json.dumps(all_data.get('designer', []), ensure_ascii=False)}
+
+Format:
+📅 {year} ခုနှစ် {month} လ Monthly Report
+
+🏭 Production
+- Total jobs completed
+- Error rate
+- Top performer
+- အကြံပြုချက်
+
+🖥️ Front Office
+- Total orders
+- Total collection
+- Issues summary
+
+🎨 Design
+- Total designs completed
+- Revision rate
+- အကြံပြုချက်
+
+💡 Overall Summary & Recommendations"""
+
+        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+        summary = response.text
+
+        max_len = 4000
+        if len(summary) <= max_len:
+            await update.message.reply_text(f"📊 Monthly Report
+
+{summary}")
+        else:
+            parts = [summary[i:i+max_len] for i in range(0, len(summary), max_len)]
+            for idx, part in enumerate(parts, 1):
+                await update.message.reply_text(f"📊 Monthly Report (Part {idx}/{len(parts)})
+
+{part}")
+                await asyncio.sleep(0.5)
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Monthly report error: {str(e)}")
+
 async def cmd_summarize_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_TELEGRAM_ID:
         await update.message.reply_text("❌ Permission မရှိပါ")
@@ -517,6 +593,7 @@ def main():
 
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("summarize", cmd_summarize_now))
+    app.add_handler(CommandHandler("monthly", cmd_monthly))
     app.add_handler(CommandHandler("weekly", cmd_weekly_now))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect_report))
