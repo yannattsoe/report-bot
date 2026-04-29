@@ -459,10 +459,7 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
     manager_note = ""
     if today in manager_reports:
         for uid, mgr in manager_reports[today].items():
-            manager_note += f"
-
-👔 Manager Note ({mgr['name']} - {mgr['group']}):
-{mgr['text']}"
+            manager_note += f"\n\n👔 Manager Note ({mgr['name']} - {mgr['group']}):\n{mgr['text']}"
 
     summary = generate_daily_summary(reports_by_group, today)
     if manager_note:
