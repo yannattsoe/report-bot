@@ -445,15 +445,15 @@ Format:
 
         max_len = 4000
         if len(summary) <= max_len:
-            await update.message.reply_text(f"📊 Monthly Report
+            await update.message.reply_text("📊 Monthly Report
 
-{summary}")
+" + summary)
         else:
             parts = [summary[i:i+max_len] for i in range(0, len(summary), max_len)]
             for idx, part in enumerate(parts, 1):
                 await update.message.reply_text(f"📊 Monthly Report (Part {idx}/{len(parts)})
 
-{part}")
+" + part)
                 await asyncio.sleep(0.5)
 
     except Exception as e:
