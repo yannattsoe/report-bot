@@ -463,10 +463,7 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
 
     summary = generate_daily_summary(reports_by_group, today)
     if manager_note:
-        summary += f"
-
-{'='*30}
-{manager_note}"
+        summary += "\n\n" + "="*30 + "\n" + manager_note
 
     max_len = 4000
     if len(summary) <= max_len:
