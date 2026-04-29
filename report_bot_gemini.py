@@ -39,6 +39,11 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 PRODUCTION_GROUP_ID = int(os.environ.get("PRODUCTION_GROUP_ID", "0"))
 FRONT_OFFICE_GROUP_ID = int(os.environ.get("FRONT_OFFICE_GROUP_ID", "0"))
 DESIGNER_GROUP_ID = int(os.environ.get("DESIGNER_GROUP_ID", "0"))
+MANAGER_IDS = {
+    8649672085: {"name": "Thar Thar", "group": "front_office"},
+    6699538735: {"name": "Gatone", "group": "production"},
+}
+manager_reports = {}
 
 MYANMAR_TZ = ZoneInfo("Asia/Yangon")
 
@@ -322,6 +327,24 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     chat_id = msg.chat_id
+
+    # Manager private message စစ်မယ်
+    if msg.chat.type == "private":
+        user_id = msg.from_user.id
+        if user_id in MANAGER_IDS:
+            today = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d")
+            if today not in manager_reports:
+                manager_reports[today] = {}
+            manager_reports[today][user_id] = {
+                "name": MANAGER_IDS[user_id]["name"],
+                "group": MANAGER_IDS[user_id]["group"],
+                "text": msg.text,
+                "time": datetime.now(MYANMAR_TZ).strftime("%H:%M")
+            }
+            await msg.reply_text("✅ Manager report သိမ်းပြီးပါပြီ။")
+            logger.info(f"Manager report from {MANAGER_IDS[user_id]['name']}")
+        return
+
     group_type = get_group_type(chat_id)
 
     if not group_type:
@@ -399,7 +422,59 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Group တစ်ခုချင်း report အကုန် တစ်ခါတည်း Gemini ကို ပို့မယ်
+    for group_type, reports in reports_by_group.items():
+        if not reports:
+            continue
+        try:
+            all_reports_text = "
+
+---
+
+".join([f"{r['user']} ({r['time']}):
+{r['text']}" for r in reports])
+            analytics = extract_analytics_from_report(all_reports_text, group_type)
+            if analytics:
+                operator = analytics.get("operator", group_type)
+                if group_type == "production":
+                    save_analytics(today, group_type, operator,
+                        analytics.get("jobs_completed", []),
+                        analytics.get("jobs_pending", []),
+                        analytics.get("errors", []),
+                        analytics.get("machine_issues", ""),
+                        analytics.get("job_types", []))
+                elif group_type == "front_office":
+                    save_analytics(today, group_type, operator,
+                        analytics.get("orders_received", []),
+                        analytics.get("payments_collected", []),
+                        analytics.get("pending_followup", []),
+                        analytics.get("issues", ""),
+                        [])
+                else:
+                    save_analytics(today, group_type, operator,
+                        analytics.get("designs_completed", []),
+                        analytics.get("designs_pending", []),
+                        analytics.get("revisions", []),
+                        "",
+                        analytics.get("priority_tomorrow", []))
+        except Exception as e:
+            logger.error(f"Analytics error for {group_type}: {e}")
+
+    # Manager report နဲ့ တိုက်စစ်မယ်
+    manager_note = ""
+    if today in manager_reports:
+        for uid, mgr in manager_reports[today].items():
+            manager_note += f"
+
+👔 Manager Note ({mgr['name']} - {mgr['group']}):
+{mgr['text']}"
+
     summary = generate_daily_summary(reports_by_group, today)
+    if manager_note:
+        summary += f"
+
+{'='*30}
+{manager_note}"
 
     max_len = 4000
     if len(summary) <= max_len:
