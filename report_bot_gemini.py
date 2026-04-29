@@ -427,12 +427,7 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
         if not reports:
             continue
         try:
-            all_reports_text = "
-
----
-
-".join([f"{r['user']} ({r['time']}):
-{r['text']}" for r in reports])
+            all_reports_text = "\n\n---\n\n".join([f"{r['user']} ({r['time']}):\n{r['text']}" for r in reports])
             analytics = extract_analytics_from_report(all_reports_text, group_type)
             if analytics:
                 operator = analytics.get("operator", group_type)
