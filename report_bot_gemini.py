@@ -383,7 +383,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_monthly(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_TELEGRAM_ID:
+    if update.effective_user.id not in [OWNER_TELEGRAM_ID, SECONDARY_OWNER_ID]:
         await update.message.reply_text("❌ Permission မရှိပါ")
         return
 
@@ -456,7 +456,7 @@ Format:
         await update.message.reply_text(f"❌ Monthly report error: {str(e)}")
 
 async def cmd_summarize_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_TELEGRAM_ID:
+    if update.effective_user.id not in [OWNER_TELEGRAM_ID, SECONDARY_OWNER_ID]:
         await update.message.reply_text("❌ Permission မရှိပါ")
         return
     await update.message.reply_text("⏳ Summary လုပ်နေပြီ...")
@@ -464,7 +464,7 @@ async def cmd_summarize_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_weekly_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != OWNER_TELEGRAM_ID:
+    if update.effective_user.id not in [OWNER_TELEGRAM_ID, SECONDARY_OWNER_ID]:
         await update.message.reply_text("❌ Permission မရှိပါ")
         return
     await update.message.reply_text("⏳ Weekly summary လုပ်နေပြီ...")
