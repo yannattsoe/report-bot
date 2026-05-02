@@ -574,6 +574,11 @@ async def send_weekly_summary(context: ContextTypes.DEFAULT_TYPE):
             chat_id=OWNER_TELEGRAM_ID,
             text=f"📊 Weekly Performance Report\n\n{summary}"
         )
+        if SECONDARY_OWNER_ID:
+            await context.bot.send_message(
+                chat_id=SECONDARY_OWNER_ID,
+                text=f"📊 Weekly Performance Report\n\n{summary}"
+            )
     else:
         parts = [summary[i:i+max_len] for i in range(0, len(summary), max_len)]
         for idx, part in enumerate(parts, 1):
