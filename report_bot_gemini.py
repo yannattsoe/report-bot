@@ -32,6 +32,7 @@ from telegram.ext import (
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 OWNER_TELEGRAM_ID = int(os.environ.get("OWNER_TELEGRAM_ID"))
+SECONDARY_OWNER_ID = int(os.environ.get("SECONDARY_OWNER_ID", "0"))
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 
@@ -323,9 +324,6 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.text:
         return
-    if msg.chat.type == "private":
-        return
-
     chat_id = msg.chat_id
 
     # Manager private message စစ်မယ်
@@ -545,6 +543,11 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
             chat_id=OWNER_TELEGRAM_ID,
             text=f"📊 Daily Report Summary\n\n{summary}"
         )
+        if SECONDARY_OWNER_ID:
+            await context.bot.send_message(
+                chat_id=SECONDARY_OWNER_ID,
+                text=f"📊 Daily Report Summary\n\n{summary}"
+            )
     else:
         parts = [summary[i:i+max_len] for i in range(0, len(summary), max_len)]
         for idx, part in enumerate(parts, 1):
