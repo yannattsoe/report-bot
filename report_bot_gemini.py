@@ -79,8 +79,8 @@ def get_sheet():
         creds_dict,
         scopes=["https://www.googleapis.com/auth/spreadsheets"]
     )
-    client = gspread.authorize(creds)
-    return client.open_by_key(SPREADSHEET_ID)
+    gspread_client = gspread.authorize(creds)  # 'client' မသုံးဘူး — global Gemini client overwrite မဖြစ်အောင်
+    return gspread_client.open_by_key(SPREADSHEET_ID)
 
 
 def save_raw_report(date, group_type, user_name, report_text, report_time):
@@ -645,6 +645,11 @@ async def send_weekly_summary(context: ContextTypes.DEFAULT_TYPE):
                 chat_id=OWNER_TELEGRAM_ID,
                 text=f"{header}{part}"
             )
+            if SECONDARY_OWNER_ID:
+                await context.bot.send_message(
+                    chat_id=SECONDARY_OWNER_ID,
+                    text=f"{header}{part}"
+                )
             await asyncio.sleep(0.5)
 
     logger.info("Weekly summary sent")
