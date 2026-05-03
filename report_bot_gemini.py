@@ -12,7 +12,7 @@ import asyncio
 import os
 import json
 import re
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from collections import defaultdict
 
@@ -191,7 +191,6 @@ def get_weekly_analytics(group_type):
         records = ws.get_all_records()
 
         # Last 7 days
-        from datetime import timedelta
         week_ago = (datetime.now(MYANMAR_TZ) - timedelta(days=7)).strftime("%Y-%m-%d")
         weekly = [r for r in records if str(r.get("Date", "")) >= week_ago]
         return weekly
