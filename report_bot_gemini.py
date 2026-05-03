@@ -122,7 +122,7 @@ def save_analytics(date, group_type, operator, jobs_completed, jobs_pending, err
                 datetime.now().strftime("%Y-%m-%d %H:%M")
             ])
     except Exception as e:
-        logger.error(f"Save analytics error: {e}")
+        logger.error(f"Save analytics error ({group_type}): {e}", exc_info=True)
 
 
 def get_weekly_analytics(group_type):
