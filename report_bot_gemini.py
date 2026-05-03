@@ -83,6 +83,46 @@ def get_sheet():
     return client.open_by_key(SPREADSHEET_ID)
 
 
+def save_raw_report(date, group_type, user_name, report_text, report_time):
+    """Report တင်တိုင်း raw text Sheet မှာ သိမ်းမယ် (restart ဖြစ်ရင် data မပျောက်အောင်)"""
+    try:
+        sheet = get_sheet()
+        try:
+            ws = sheet.worksheet("Raw_Reports")
+        except Exception:
+            ws = sheet.add_worksheet("Raw_Reports", rows=1000, cols=6)
+            ws.append_row(["Date", "Group", "User", "Time", "Text", "Timestamp"])
+        ws.append_row([
+            date, group_type, user_name, report_time, report_text,
+            datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d %H:%M")
+        ])
+    except Exception as e:
+        logger.error(f"Save raw report error: {e}")
+
+
+def get_todays_raw_reports(date):
+    """Summary အချိန်မှာ Sheet ကနေ ဒီနေ့ reports ဖတ်မယ် (bot restart ဖြစ်ခဲ့ရင်)"""
+    try:
+        sheet = get_sheet()
+        ws = sheet.worksheet("Raw_Reports")
+        records = ws.get_all_records()
+        result = {}
+        for r in records:
+            if str(r.get("Date", "")) == date:
+                gt = r.get("Group", "")
+                if gt not in result:
+                    result[gt] = []
+                result[gt].append({
+                    "user": r.get("User", ""),
+                    "text": r.get("Text", ""),
+                    "time": r.get("Time", "")
+                })
+        return result
+    except Exception as e:
+        logger.error(f"Get raw reports error: {e}")
+        return {}
+
+
 def save_analytics(date, group_type, operator, jobs_completed, jobs_pending, errors, machine_issues, job_types):
     try:
         sheet = get_sheet()
@@ -200,7 +240,7 @@ JSON ပဲ ထုတ်ပေးပါ၊ တခြားစကား မထည
 Report:
 {report_text}"""
 
-        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         text = response.text.strip()
         # JSON ထုတ်မယ်
         text = re.sub(r'```json|```', '', text).strip()
@@ -248,7 +288,7 @@ def generate_daily_summary(reports_by_group, date):
 ---
 {report_text}"""
 
-        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text
     except Exception as e:
         logger.error(f"Daily summary error: {e}")
@@ -301,7 +341,7 @@ FRONT OFFICE DATA:
 DESIGN DATA:
 {json.dumps(design_data, ensure_ascii=False, indent=2)}"""
 
-        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text
     except Exception as e:
         logger.error(f"Weekly summary error: {e}")
@@ -358,7 +398,8 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "time": report_time
     })
 
-    # Analytics ကို summary အချိန်မှာပဲ လုပ်မယ် (quota သက်သာဖို့)
+    # Sheet မှာ raw text သိမ်းမယ် (restart ဖြစ်ရင် data မပျောက်အောင်)
+    save_raw_report(today, group_type, user_name, msg.text, report_time)
 
     logger.info(f"Report collected from {user_name} ({group_type}) at {report_time}")
 
@@ -438,7 +479,7 @@ Format:
 
 💡 Overall Summary & Recommendations"""
 
-        response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         summary = response.text
 
         max_len = 4000
@@ -486,6 +527,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d")
     reports_by_group = daily_reports.get(today, {})
+
+    # Memory ထဲမှာ မရှိရင် Sheet ကနေ ဖတ်မယ် (bot restart ဖြစ်ခဲ့ရင်)
+    if not any(reports_by_group.values()):
+        reports_by_group = get_todays_raw_reports(today)
 
     if not any(reports_by_group.values()):
         await context.bot.send_message(
