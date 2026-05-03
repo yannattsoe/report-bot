@@ -89,7 +89,7 @@ def save_raw_report(date, group_type, user_name, report_text, report_time):
         sheet = get_sheet()
         try:
             ws = sheet.worksheet("Raw_Reports")
-        except Exception:
+        except gspread.exceptions.WorksheetNotFound:
             ws = sheet.add_worksheet("Raw_Reports", rows=1000, cols=6)
             ws.append_row(["Date", "Group", "User", "Time", "Text", "Timestamp"])
         ws.append_row([
@@ -104,7 +104,10 @@ def get_todays_raw_reports(date):
     """Summary အချိန်မှာ Sheet ကနေ ဒီနေ့ reports ဖတ်မယ် (bot restart ဖြစ်ခဲ့ရင်)"""
     try:
         sheet = get_sheet()
-        ws = sheet.worksheet("Raw_Reports")
+        try:
+            ws = sheet.worksheet("Raw_Reports")
+        except gspread.exceptions.WorksheetNotFound:
+            return {}  # sheet မရှိသေးရင် empty ပြန်မယ်
         records = ws.get_all_records()
         result = {}
         for r in records:
@@ -123,7 +126,12 @@ def get_todays_raw_reports(date):
         return {}
 
 
-def save_analytics(date, group_type, operator, jobs_completed, jobs_pending, errors, machine_issues, job_types):
+def save_analytics(date, group_type, operator, col3, col4, col5, col6, col7):
+    """
+    Production  → Jobs_Completed, Jobs_Pending, Errors, Machine_Issues, Job_Types
+    FrontOffice → Orders_Received, Payments, Pending_Followup, Issues, (unused)
+    Designer    → Designs_Completed, Designs_Pending, Revisions, (unused), Priority_Tomorrow
+    """
     try:
         sheet = get_sheet()
         sheet_name = {
@@ -133,33 +141,38 @@ def save_analytics(date, group_type, operator, jobs_completed, jobs_pending, err
         }.get(group_type, "Production_Analytics")
 
         ws = sheet.worksheet(sheet_name)
+        ts = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d %H:%M")
+
         if group_type == "production":
+            # Columns: Date, Operator, Jobs_Completed, Jobs_Pending, Errors, Machine_Issues, Job_Types, Timestamp
             ws.append_row([
                 date, operator,
-                json.dumps(jobs_completed, ensure_ascii=False),
-                json.dumps(jobs_pending, ensure_ascii=False),
-                json.dumps(errors, ensure_ascii=False),
-                machine_issues,
-                json.dumps(job_types, ensure_ascii=False),
-                datetime.now().strftime("%Y-%m-%d %H:%M")
+                json.dumps(col3, ensure_ascii=False),
+                json.dumps(col4, ensure_ascii=False),
+                json.dumps(col5, ensure_ascii=False),
+                col6,
+                json.dumps(col7, ensure_ascii=False),
+                ts
             ])
         elif group_type == "front_office":
+            # Columns: Date, Operator, Orders_Received, Payments, Pending_Followup, Issues, Timestamp
             ws.append_row([
                 date, operator,
-                json.dumps(jobs_completed, ensure_ascii=False),
-                json.dumps(jobs_pending, ensure_ascii=False),
-                json.dumps(errors, ensure_ascii=False),
-                machine_issues,
-                datetime.now().strftime("%Y-%m-%d %H:%M")
+                json.dumps(col3, ensure_ascii=False),
+                json.dumps(col4, ensure_ascii=False),
+                json.dumps(col5, ensure_ascii=False),
+                col6,
+                ts
             ])
-        else:
+        else:  # designer
+            # Columns: Date, Operator, Designs_Completed, Revisions, Designs_Pending, Priority_Tomorrow, Timestamp
             ws.append_row([
                 date, operator,
-                json.dumps(jobs_completed, ensure_ascii=False),
-                json.dumps(jobs_pending, ensure_ascii=False),
-                json.dumps(errors, ensure_ascii=False),
-                machine_issues,
-                datetime.now().strftime("%Y-%m-%d %H:%M")
+                json.dumps(col3, ensure_ascii=False),
+                json.dumps(col4, ensure_ascii=False),
+                json.dumps(col5, ensure_ascii=False),
+                json.dumps(col7, ensure_ascii=False),
+                ts
             ])
     except Exception as e:
         logger.error(f"Save analytics error ({group_type}): {e}", exc_info=True)
@@ -435,12 +448,7 @@ async def cmd_monthly(update: Update, context: ContextTypes.DEFAULT_TYPE):
     month = now.month
 
     try:
-        creds = Credentials.from_service_account_info(
-            json.loads(GOOGLE_CREDENTIALS_JSON),
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(SPREADSHEET_ID)
+        sheet = get_sheet()  # global client မ overwrite မဖြစ်အောင် get_sheet() သုံးမယ်
 
         all_data = {}
         for group, tab in [("production", "Production_Analytics"), ("front_office", "FrontOffice_Analytics"), ("designer", "Design_Analytics")]:
@@ -479,17 +487,16 @@ Format:
 
 💡 Overall Summary & Recommendations"""
 
-        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        gemini = genai.Client(api_key=GEMINI_API_KEY)
+        response = gemini.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         summary = response.text
 
         max_len = 4000
         if len(summary) <= max_len:
             await update.message.reply_text("📊 Monthly Report\n\n" + summary)
-
         else:
             parts = [summary[i:i+max_len] for i in range(0, len(summary), max_len)]
             for idx, part in enumerate(parts, 1):
-
                 await update.message.reply_text(f"📊 Monthly Report (Part {idx}/{len(parts)})\n\n" + part)
                 await asyncio.sleep(0.5)
 
@@ -562,11 +569,12 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
                         analytics.get("pending_followup", []),
                         analytics.get("issues", ""),
                         [])
-                else:
+                else:  # designer
+                    # col3=Designs_Completed, col4=Revisions, col5=Designs_Pending, col7=Priority_Tomorrow
                     save_analytics(today, group_type, operator,
                         analytics.get("designs_completed", []),
-                        analytics.get("designs_pending", []),
                         analytics.get("revisions", []),
+                        analytics.get("designs_pending", []),
                         "",
                         analytics.get("priority_tomorrow", []))
         except Exception as e:
@@ -601,6 +609,11 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
                 chat_id=OWNER_TELEGRAM_ID,
                 text=f"{header}{part}"
             )
+            if SECONDARY_OWNER_ID:
+                await context.bot.send_message(
+                    chat_id=SECONDARY_OWNER_ID,
+                    text=f"{header}{part}"
+                )
             await asyncio.sleep(0.5)
 
     logger.info(f"Daily summary sent for {today}")
