@@ -262,14 +262,25 @@ Report:
         return {}
 
 
-def generate_daily_summary(reports_by_group, date):
-    """Daily summary ရေးမယ်"""
+def generate_daily_summary(reports_by_group, date, manager_notes_text=""):
+    """Daily summary ရေးမယ် — manager notes ပါရင် operator reports နဲ့ တိုက်စစ်မယ်"""
     try:
         report_text = f"Date: {date}\n\n"
         for group, reports in reports_by_group.items():
+            if group.startswith("manager_"):
+                continue
             report_text += f"=== {group.upper()} ===\n"
             for r in reports:
                 report_text += f"{r['user']} ({r['time']}):\n{r['text']}\n\n"
+
+        manager_section = ""
+        if manager_notes_text:
+            manager_section = f"""
+=== MANAGER REPORTS ===
+{manager_notes_text}
+
+⚠️ CROSS-CHECK လုပ်ပါ: Manager report နဲ့ Operator report တိုက်စစ်ပြီး ကွာဟချက်တွေ ရှိရင် highlight လုပ်ပါ။
+"""
 
         prompt = f"""အောက်က reports တွေကို ဖတ်ပြီး boss အတွက် daily summary ရေးပေးပါ။
 မြန်မာဘာသာနဲ့ ရေးပေးပါ။
@@ -278,7 +289,7 @@ def generate_daily_summary(reports_by_group, date):
 
 🏭 PRODUCTION
 - ပြီးစီးသော jobs
-- ကျန်ရှိသော jobs  
+- ကျန်ရှိသော jobs
 - Error / ပျက်စီးမှု
 - စက်ပြဿနာ
 
@@ -294,11 +305,15 @@ def generate_daily_summary(reports_by_group, date):
 
 ⚠️ ISSUES တွေ highlight
 
+{"🔍 MANAGER vs OPERATOR CROSS-CHECK" + chr(10) + "- Manager report နဲ့ operator report ကွာဟချက်တွေ" + chr(10) + "- မကိုက်ညီတာတွေ boss ကို သတိပေးပါ" if manager_notes_text else ""}
+
 💡 BOSS ACTION ITEMS
 - ဘာ action လုပ်သင့်လဲ
 
 ---
-{report_text}"""
+OPERATOR REPORTS:
+{report_text}
+{manager_section}"""
 
         response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text
@@ -383,16 +398,21 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = msg.from_user.id
         if user_id in MANAGER_IDS:
             today = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d")
+            report_time = datetime.now(MYANMAR_TZ).strftime("%H:%M")
+            mgr_name = MANAGER_IDS[user_id]["name"]
+            mgr_group = MANAGER_IDS[user_id]["group"]
             if today not in manager_reports:
                 manager_reports[today] = {}
             manager_reports[today][user_id] = {
-                "name": MANAGER_IDS[user_id]["name"],
-                "group": MANAGER_IDS[user_id]["group"],
+                "name": mgr_name,
+                "group": mgr_group,
                 "text": msg.text,
-                "time": datetime.now(MYANMAR_TZ).strftime("%H:%M")
+                "time": report_time
             }
+            # Sheet မှာ manager report သိမ်းမယ် (restart ဖြစ်ရင် မပျောက်အောင်)
+            save_raw_report(today, f"manager_{mgr_group}", mgr_name, msg.text, report_time)
             await msg.reply_text("✅ Manager report သိမ်းပြီးပါပြီ။")
-            logger.info(f"Manager report from {MANAGER_IDS[user_id]['name']}")
+            logger.info(f"Manager report from {mgr_name}")
         return
 
     group_type = get_group_type(chat_id)
@@ -579,15 +599,30 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Analytics error for {group_type}: {e}")
 
-    # Manager report နဲ့ တိုက်စစ်မယ်
-    manager_note = ""
+    # Manager report ရှာမယ် — memory မှာ မရှိရင် Sheet ကနေ ဖတ်မယ်
+    manager_data = {}
     if today in manager_reports:
-        for uid, mgr in manager_reports[today].items():
-            manager_note += f"\n\n👔 Manager Note ({mgr['name']} - {mgr['group']}):\n{mgr['text']}"
+        manager_data = manager_reports[today]
+    else:
+        # Sheet ကနေ manager reports ပြန်ဖတ်မယ် (restart ဖြစ်ခဲ့ရင်)
+        raw = get_todays_raw_reports(today)
+        for key, reports in raw.items():
+            if key.startswith("manager_"):
+                group = key.replace("manager_", "")
+                for r in reports:
+                    manager_data[r["user"]] = {
+                        "name": r["user"],
+                        "group": group,
+                        "text": r["text"],
+                        "time": r["time"]
+                    }
 
-    summary = generate_daily_summary(reports_by_group, today)
-    if manager_note:
-        summary += "\n\n" + "="*30 + "\n" + manager_note
+    # Manager report နဲ့ operator reports တိုက်စစ်ပြီး Gemini ကို ပို့မယ်
+    manager_notes_text = ""
+    for uid, mgr in manager_data.items():
+        manager_notes_text += f"\n\n👔 {mgr['name']} ({mgr['group']}) Manager Report:\n{mgr['text']}"
+
+    summary = generate_daily_summary(reports_by_group, today, manager_notes_text)
 
     max_len = 4000
     if len(summary) <= max_len:
