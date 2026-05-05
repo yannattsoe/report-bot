@@ -71,6 +71,9 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 daily_reports = defaultdict(lambda: defaultdict(list))
 # daily_reports[date][group_type] = [{"user": ..., "text": ..., "time": ...}]
 
+# Raw_Reports header check cache — တစ်ခါပဲ စစ်ဖို့
+_raw_reports_header_checked = False
+
 
 # ==================== GOOGLE SHEETS ====================
 
@@ -117,7 +120,8 @@ def get_employees_by_group():
                     result[g] = []
                 result[g].append({
                     "name": r.get("Name", ""),
-                    "telegram_id": str(r.get("Telegram_ID", "")).strip()
+                    "telegram_id": str(r.get("Telegram_ID", "")).strip(),
+                    "username": str(r.get("Telegram_Username", "")).strip().lower().lstrip("@")
                 })
         return result
     except Exception as e:
@@ -125,23 +129,31 @@ def get_employees_by_group():
         return {}
 
 
-def save_raw_report(date, group_type, user_name, report_text, report_time, user_id=""):
+def save_raw_report(date, group_type, user_name, report_text, report_time, user_id="", username=""):
     """Report တင်တိုင်း raw text Sheet မှာ သိမ်းမယ် (restart ဖြစ်ရင် data မပျောက်အောင်)"""
+    global _raw_reports_header_checked
     try:
         sheet = get_sheet()
         try:
             ws = sheet.worksheet("Raw_Reports")
         except gspread.exceptions.WorksheetNotFound:
-            ws = sheet.add_worksheet("Raw_Reports", rows=1000, cols=7)
-            ws.append_row(["Date", "Group", "User", "Time", "Text", "Timestamp", "UserID"])
-        # UserID header မရှိသေးရင် ထည့်မယ် (existing sheet အတွက်)
-        headers = ws.row_values(1)
-        if "UserID" not in headers:
-            ws.update_cell(1, len(headers) + 1, "UserID")
+            ws = sheet.add_worksheet("Raw_Reports", rows=1000, cols=8)
+            ws.append_row(["Date", "Group", "User", "Time", "Text", "Timestamp", "UserID", "Username"])
+            _raw_reports_header_checked = True
+        # Header တစ်ကြိမ်ပဲ စစ်မယ် (API call သက်သာဖို့)
+        if not _raw_reports_header_checked:
+            headers = ws.row_values(1)
+            if "UserID" not in headers:
+                ws.update_cell(1, len(headers) + 1, "UserID")
+                headers.append("UserID")
+            if "Username" not in headers:
+                ws.update_cell(1, len(headers) + 1, "Username")
+            _raw_reports_header_checked = True
         ws.append_row([
             date, group_type, user_name, report_time, report_text,
             datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d %H:%M"),
-            str(user_id)
+            str(user_id),
+            username.lower().lstrip("@") if username else ""
         ])
     except Exception as e:
         logger.error(f"Save raw report error: {e}")
@@ -252,11 +264,12 @@ def extract_analytics_from_report(report_text, group_type):
     """Gemini ကို သုံးပြီး report ထဲက structured data ထုတ်မယ်"""
     try:
         if group_type == "production":
-            prompt = f"""အောက်က production report ကို ဖတ်ပြီး JSON format နဲ့ ထုတ်ပေးပါ။
-JSON ပဲ ထုတ်ပေးပါ၊ တခြားစကား မထည့်နဲ့။
+            prompt = f"""အောက်က production reports တွေကို ဖတ်ပြီး တစ်ခုတည်းသော JSON object အနေနဲ့ ထုတ်ပေးပါ။
+JSON object တစ်ခုပဲ ထုတ်ပါ၊ array မဟုတ်ဘူး၊ တခြားစကား မထည့်နဲ့။
+Report ပေါင်းများနေရင် jobs တွေ အကုန်ပေါင်းထည့်ပြီး operator field မှာ နာမည်တွေ comma နဲ့ ဖော်ပြပါ။
 
 {{
-  "operator": "နာမည်",
+  "operator": "နာမည်တွေ comma နဲ့",
   "jobs_completed": ["job1", "job2"],
   "jobs_pending": ["job1"],
   "errors": ["error1"],
@@ -268,28 +281,30 @@ Report:
 {report_text}"""
 
         elif group_type == "front_office":
-            prompt = f"""အောက်က front office report ကို ဖတ်ပြီး JSON format နဲ့ ထုတ်ပေးပါ။
-JSON ပဲ ထုတ်ပေးပါ၊ တခြားစကား မထည့်နဲ့။
+            prompt = f"""အောက်က front office reports တွေကို ဖတ်ပြီး တစ်ခုတည်းသော JSON object အနေနဲ့ ထုတ်ပေးပါ။
+JSON object တစ်ခုပဲ ထုတ်ပါ၊ array မဟုတ်ဘူး၊ တခြားစကား မထည့်နဲ့။
+Report ပေါင်းများနေရင် items တွေ အကုန်ပေါင်းထည့်ပါ။
 
 {{
-  "operator": "name of the person who wrote this report",
-  "orders_received": ["extract each order: customer name, job type, size, quantity"],
-  "payments_collected": ["extract each payment: customer name and amount"],
-  "pending_followup": ["customers that need follow up tomorrow"],
-  "issues": "any problems mentioned, or မရှိပါ if none"
+  "operator": "နာမည်တွေ comma နဲ့",
+  "orders_received": ["customer name, job type, size, quantity"],
+  "payments_collected": ["customer name, amount"],
+  "pending_followup": ["customer name"],
+  "issues": "ပြဿနာများ သို့မဟုတ် မရှိပါ"
 }}
 
-Important: Extract ALL items found in the report. Do not return empty arrays if data exists.
+Important: Extract ALL items. Do not return empty arrays if data exists.
 
 Report:
 {report_text}"""
 
         else:  # designer
-            prompt = f"""အောက်က designer report ကို ဖတ်ပြီး JSON format နဲ့ ထုတ်ပေးပါ။
-JSON ပဲ ထုတ်ပေးပါ၊ တခြားစကား မထည့်နဲ့။
+            prompt = f"""အောက်က designer reports တွေကို ဖတ်ပြီး တစ်ခုတည်းသော JSON object အနေနဲ့ ထုတ်ပေးပါ။
+JSON object တစ်ခုပဲ ထုတ်ပါ၊ array မဟုတ်ဘူး၊ တခြားစကား မထည့်နဲ့။
+Report ပေါင်းများနေရင် designs တွေ အကုန်ပေါင်းထည့်ပါ။
 
 {{
-  "operator": "နာမည်",
+  "operator": "နာမည်တွေ comma နဲ့",
   "designs_completed": ["design1"],
   "revisions": ["design - reason"],
   "designs_pending": ["design1"],
@@ -303,7 +318,23 @@ Report:
         text = response.text.strip()
         # JSON ထုတ်မယ်
         text = re.sub(r'```json|```', '', text).strip()
-        return json.loads(text)
+        parsed = json.loads(text)
+        # Gemini က array ပြန်ပေးရင် (multiple operators) merge လုပ်မယ်
+        if isinstance(parsed, list):
+            merged = {}
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                for k, v in item.items():
+                    if k == "operator":
+                        merged[k] = merged.get(k, "") + ("," if merged.get(k) else "") + str(v)
+                    elif isinstance(v, list):
+                        merged.setdefault(k, [])
+                        merged[k].extend(v)
+                    else:
+                        merged[k] = v
+            return merged
+        return parsed
     except Exception as e:
         logger.error(f"Extract analytics error: {e}")
         return {}
@@ -468,9 +499,17 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return  # Unknown group — ignore
 
     today = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d")
-    user_name = msg.from_user.full_name or msg.from_user.username or "Unknown"
     user_id = msg.from_user.id
+    tg_username = msg.from_user.username or ""
     report_time = datetime.now(MYANMAR_TZ).strftime("%H:%M")
+
+    # Report ထဲက နာမည် extract မယ် — "အမည် - [နာမည်]" format
+    name_match = re.search(r'အမည်\s*[-–]\s*\[?([^\]\n\(\[]+)', msg.text)
+    extracted_name = name_match.group(1).strip().rstrip('-').strip() if name_match else ""
+    if extracted_name and len(extracted_name) > 1:
+        user_name = extracted_name
+    else:
+        user_name = msg.from_user.full_name or tg_username or "Unknown"
 
     daily_reports[today][group_type].append({
         "user": user_name,
@@ -479,7 +518,7 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
 
     # Sheet မှာ raw text သိမ်းမယ် (restart ဖြစ်ရင် data မပျောက်အောင်)
-    save_raw_report(today, group_type, user_name, msg.text, report_time, user_id)
+    save_raw_report(today, group_type, user_name, msg.text, report_time, user_id, tg_username)
 
     # Report ရပြီ confirmation reply
     await msg.reply_text(f"✅ {user_name} ရဲ့ report ရပြီပါပြီ။ ({report_time})")
@@ -747,20 +786,33 @@ async def send_report_reminder(context: ContextTypes.DEFAULT_TYPE):
     """ညနေ ၅:၁၅ — report မတင်ရသေးတဲ့သူတွေကို group ထဲ list ပြမယ်"""
     today = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d")
 
-    # ဒီနေ့ report တင်ပြီးသူ Telegram IDs ရှာမယ်
+    # ဒီနေ့ report တင်ပြီးသူ ရှာမယ်
     try:
         sheet = get_sheet()
         ws = sheet.worksheet("Raw_Reports")
         records = ws.get_all_records()
-        reported_ids = set()   # Telegram ID နဲ့ match လုပ်မယ်
-        reported_users = set() # name fallback အတွက်
+        reported_ids = set()        # Telegram ID match
+        reported_users = set()      # report ထဲက နာမည် match (case-insensitive)
+        username_to_names = {}      # username → [နာမည်တွေ] (တစ်နေ့တည်း ၂ ခါ တင်ရင်)
+
         for r in records:
             if str(r.get("Date", "")) == today and not str(r.get("Group", "")).startswith("manager_"):
                 uid = str(r.get("UserID", "")).strip()
                 grp = str(r.get("Group", ""))
+                uname = str(r.get("Username", "")).strip().lower()
+                rpt_name = str(r.get("User", "")).strip().lower()
+
                 if uid:
                     reported_ids.add((grp, uid))
-                reported_users.add((grp, str(r.get("User", ""))))
+
+                # username → report name mapping သိမ်းမယ်
+                if uname:
+                    key = (grp, uname)
+                    if key not in username_to_names:
+                        username_to_names[key] = set()
+                    username_to_names[key].add(rpt_name)
+
+                reported_users.add((grp, rpt_name))
     except Exception as e:
         logger.error(f"Reminder - get raw reports error: {e}")
         return
@@ -803,13 +855,34 @@ async def send_report_reminder(context: ContextTypes.DEFAULT_TYPE):
         missing = []
         for emp in employees:
             emp_name = emp["name"]
+            emp_name_lower = emp_name.strip().lower()
             emp_id = emp["telegram_id"]
-            # ID နဲ့ match ရှာမယ်၊ မရှိရင် name နဲ့ fallback
-            reported = (
-                (group_type, emp_id) in reported_ids or
-                (group_type, emp_name) in reported_users
-            )
-            if not reported and emp_name not in on_leave_today:
+            emp_uname = emp.get("username", "").strip().lower()
+
+            # 1. ID နဲ့ match
+            by_id = (group_type, emp_id) in reported_ids
+
+            # 2. Username + report name နဲ့ match
+            # Same username ၂ ခါ တင်ရင် report ထဲက နာမည် ဖတ်မယ်
+            by_username = False
+            if emp_uname:
+                uname_key = (group_type, emp_uname)
+                names_from_username = username_to_names.get(uname_key, set())
+                if emp_name_lower in names_from_username:
+                    # username ကနေ ဒီ employee ရဲ့ နာမည် တွေ့တယ်
+                    by_username = True
+                elif len(names_from_username) == 1:
+                    # username တစ်ခုတည်း တစ်ကြိမ်ပဲ တင်ရင် ဒီ employee ဆိုပြီး မှတ်မယ်
+                    by_username = True
+
+            # 3. Report name fallback (case-insensitive)
+            by_name = (group_type, emp_name_lower) in reported_users
+
+            reported = by_id or by_username or by_name
+
+            # leave check (case-insensitive)
+            on_leave = any(emp_name_lower == l.strip().lower() for l in on_leave_today)
+            if not reported and not on_leave:
                 missing.append(emp_name)
 
         if missing:
