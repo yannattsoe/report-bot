@@ -35,6 +35,7 @@ OWNER_TELEGRAM_ID = int(os.environ.get("OWNER_TELEGRAM_ID"))
 SECONDARY_OWNER_ID = int(os.environ.get("SECONDARY_OWNER_ID", "0"))
 GOOGLE_CREDENTIALS_JSON = os.environ.get("GOOGLE_CREDENTIALS_JSON")
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
+LEAVE_SPREADSHEET_ID = os.environ.get("LEAVE_SPREADSHEET_ID", "")
 
 # Group IDs
 PRODUCTION_GROUP_ID = int(os.environ.get("PRODUCTION_GROUP_ID", "0"))
@@ -83,18 +84,64 @@ def get_sheet():
     return gspread_client.open_by_key(SPREADSHEET_ID)
 
 
-def save_raw_report(date, group_type, user_name, report_text, report_time):
+def get_leave_sheet():
+    """Leave bot ရဲ့ Employees sheet ကနေ ဖတ်မယ်"""
+    if not LEAVE_SPREADSHEET_ID:
+        raise ValueError("LEAVE_SPREADSHEET_ID not configured")
+    creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+    creds = Credentials.from_service_account_info(
+        creds_dict,
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    gspread_client = gspread.authorize(creds)
+    return gspread_client.open_by_key(LEAVE_SPREADSHEET_ID)
+
+
+def get_employees_by_group():
+    """Leave bot Employees sheet ကနေ group တစ်ခုချင်း ဝန်ထမ်းစာရင်း ဖတ်မယ်"""
+    try:
+        if not LEAVE_SPREADSHEET_ID:
+            return {}
+        sheet = get_leave_sheet()
+        ws = sheet.worksheet("Employees")
+        records = ws.get_all_records()
+        result = {}
+        for r in records:
+            group = str(r.get("Group", "")).strip().lower()
+            if not group:
+                continue
+            # comma ခွဲထားတဲ့ multi-group handle မယ်
+            groups = [g.strip() for g in group.split(",")]
+            for g in groups:
+                if g not in result:
+                    result[g] = []
+                result[g].append({
+                    "name": r.get("Name", ""),
+                    "telegram_id": str(r.get("Telegram_ID", "")).strip()
+                })
+        return result
+    except Exception as e:
+        logger.error(f"Get employees error: {e}")
+        return {}
+
+
+def save_raw_report(date, group_type, user_name, report_text, report_time, user_id=""):
     """Report တင်တိုင်း raw text Sheet မှာ သိမ်းမယ် (restart ဖြစ်ရင် data မပျောက်အောင်)"""
     try:
         sheet = get_sheet()
         try:
             ws = sheet.worksheet("Raw_Reports")
         except gspread.exceptions.WorksheetNotFound:
-            ws = sheet.add_worksheet("Raw_Reports", rows=1000, cols=6)
-            ws.append_row(["Date", "Group", "User", "Time", "Text", "Timestamp"])
+            ws = sheet.add_worksheet("Raw_Reports", rows=1000, cols=7)
+            ws.append_row(["Date", "Group", "User", "Time", "Text", "Timestamp", "UserID"])
+        # UserID header မရှိသေးရင် ထည့်မယ် (existing sheet အတွက်)
+        headers = ws.row_values(1)
+        if "UserID" not in headers:
+            ws.update_cell(1, len(headers) + 1, "UserID")
         ws.append_row([
             date, group_type, user_name, report_time, report_text,
-            datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d %H:%M")
+            datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d %H:%M"),
+            str(user_id)
         ])
     except Exception as e:
         logger.error(f"Save raw report error: {e}")
@@ -422,6 +469,7 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     today = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d")
     user_name = msg.from_user.full_name or msg.from_user.username or "Unknown"
+    user_id = msg.from_user.id
     report_time = datetime.now(MYANMAR_TZ).strftime("%H:%M")
 
     daily_reports[today][group_type].append({
@@ -431,7 +479,10 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
 
     # Sheet မှာ raw text သိမ်းမယ် (restart ဖြစ်ရင် data မပျောက်အောင်)
-    save_raw_report(today, group_type, user_name, msg.text, report_time)
+    save_raw_report(today, group_type, user_name, msg.text, report_time, user_id)
+
+    # Report ရပြီ confirmation reply
+    await msg.reply_text(f"✅ {user_name} ရဲ့ report ရပြီပါပြီ။ ({report_time})")
 
     logger.info(f"Report collected from {user_name} ({group_type}) at {report_time}")
 
@@ -692,6 +743,92 @@ async def send_weekly_summary(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Weekly summary sent")
 
 
+async def send_report_reminder(context: ContextTypes.DEFAULT_TYPE):
+    """ညနေ ၅:၁၅ — report မတင်ရသေးတဲ့သူတွေကို group ထဲ list ပြမယ်"""
+    today = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d")
+
+    # ဒီနေ့ report တင်ပြီးသူ Telegram IDs ရှာမယ်
+    try:
+        sheet = get_sheet()
+        ws = sheet.worksheet("Raw_Reports")
+        records = ws.get_all_records()
+        reported_ids = set()   # Telegram ID နဲ့ match လုပ်မယ်
+        reported_users = set() # name fallback အတွက်
+        for r in records:
+            if str(r.get("Date", "")) == today and not str(r.get("Group", "")).startswith("manager_"):
+                uid = str(r.get("UserID", "")).strip()
+                grp = str(r.get("Group", ""))
+                if uid:
+                    reported_ids.add((grp, uid))
+                reported_users.add((grp, str(r.get("User", ""))))
+    except Exception as e:
+        logger.error(f"Reminder - get raw reports error: {e}")
+        return
+
+    # ဒီနေ့ leave ယူထားတဲ့သူ ရှာမယ် (reminder မပို့ဖို့)
+    on_leave_today = set()
+    try:
+        if LEAVE_SPREADSHEET_ID:
+            leave_sheet = get_leave_sheet()
+            ws_leave = leave_sheet.worksheet("Leave_Requests")
+            leave_records = ws_leave.get_all_records()
+            for r in leave_records:
+                leave_date = str(r.get("Leave_Date", "")).strip()
+                status = str(r.get("Status", "")).strip()
+                if leave_date == today and status == "Approved":
+                    on_leave_today.add(str(r.get("Name", "")).strip())
+    except Exception as e:
+        logger.error(f"Reminder - get leave data error: {e}")
+
+    # Leave bot Employees sheet ကနေ ဝန်ထမ်းစာရင်း ဖတ်မယ်
+    employees_by_group = get_employees_by_group()
+    if not employees_by_group:
+        logger.warning("Reminder - no employee data found")
+        return
+
+    group_chat_map = {
+        "production": PRODUCTION_GROUP_ID,
+        "front_office": FRONT_OFFICE_GROUP_ID,
+        "designer": DESIGNER_GROUP_ID,
+    }
+
+    for group_type, chat_id in group_chat_map.items():
+        if not chat_id:
+            continue
+        employees = employees_by_group.get(group_type, [])
+        if not employees:
+            continue
+
+        # Report မတင်ရသေးတဲ့သူ ရှာမယ် (leave ယူထားတဲ့သူ ဖြုတ်မယ်)
+        missing = []
+        for emp in employees:
+            emp_name = emp["name"]
+            emp_id = emp["telegram_id"]
+            # ID နဲ့ match ရှာမယ်၊ မရှိရင် name နဲ့ fallback
+            reported = (
+                (group_type, emp_id) in reported_ids or
+                (group_type, emp_name) in reported_users
+            )
+            if not reported and emp_name not in on_leave_today:
+                missing.append(emp_name)
+
+        if missing:
+            names_list = "\n".join([f"  • {n}" for n in missing])
+            msg = (
+                f"⏰ ညနေ ၅:၁၅ Report Reminder\n\n"
+                f"အောက်ပါ ဝန်ထမ်းများ ဒီနေ့ report မတင်ရသေးပါ:\n\n"
+                f"{names_list}\n\n"
+                f"မြန်မြန် တင်ပေးပါ 🙏"
+            )
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=msg)
+                logger.info(f"Reminder sent to {group_type}: {missing}")
+            except Exception as e:
+                logger.error(f"Reminder send error ({group_type}): {e}")
+        else:
+            logger.info(f"Reminder - all reported in {group_type}")
+
+
 # ==================== MAIN ====================
 
 def main():
@@ -703,6 +840,10 @@ def main():
     app.add_handler(CommandHandler("weekly", cmd_weekly_now))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, collect_report))
+
+    # Report reminder: 5:15 PM Myanmar = 10:45 UTC (တနင်္လာ-သောကြာ ပဲ)
+    reminder_time = time(hour=10, minute=45)
+    app.job_queue.run_daily(send_report_reminder, time=reminder_time, days=(0, 1, 2, 3, 4))
 
     # Daily: 10:00 PM Myanmar = 15:30 UTC
     daily_time = time(hour=DAILY_HOUR_UTC, minute=DAILY_MINUTE_UTC)
