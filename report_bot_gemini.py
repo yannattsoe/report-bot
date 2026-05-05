@@ -569,6 +569,9 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
     for group_type, reports in reports_by_group.items():
         if not reports:
             continue
+        # Manager reports ကို skip မယ် — analytics မထုတ်ဘူး
+        if group_type.startswith("manager_"):
+            continue
         try:
             all_reports_text = "\n\n---\n\n".join([f"{r['user']} ({r['time']}):\n{r['text']}" for r in reports])
             analytics = extract_analytics_from_report(all_reports_text, group_type)
@@ -588,7 +591,7 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
                         analytics.get("pending_followup", []),
                         analytics.get("issues", ""),
                         [])
-                else:  # designer
+                elif group_type == "designer":
                     # col3=Designs_Completed, col4=Revisions, col5=Designs_Pending, col7=Priority_Tomorrow
                     save_analytics(today, group_type, operator,
                         analytics.get("designs_completed", []),
