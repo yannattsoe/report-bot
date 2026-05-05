@@ -521,7 +521,7 @@ async def collect_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_raw_report(today, group_type, user_name, msg.text, report_time, user_id, tg_username)
 
     # Report ရပြီ confirmation reply
-    await msg.reply_text(f"✅ {user_name} ရဲ့ report ရပြီပါပြီ။ ({report_time})")
+    await msg.reply_text(f"✅ {user_name} မှ ဒီနေ့ report တင်ပြီးပါပြီ 👍")
 
     logger.info(f"Report collected from {user_name} ({group_type}) at {report_time}")
 
