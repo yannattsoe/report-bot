@@ -302,6 +302,29 @@ def get_weekly_analytics(group_type):
 
 # ==================== GEMINI FUNCTIONS ====================
 
+def gemini_generate_with_retry(prompt, max_retries=3, delay_seconds=10):
+    """Gemini call ကို retry logic နဲ့ ခေါ်မယ် — 503/overload error ဖြစ်ရင် ထပ်ကြိုးစားမယ်"""
+    import time
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+            return response.text
+        except Exception as e:
+            last_error = e
+            err_str = str(e)
+            # 503 UNAVAILABLE သို့မဟုတ် overload error ဆိုရင် retry လုပ်မယ်
+            if "503" in err_str or "UNAVAILABLE" in err_str or "overload" in err_str.lower() or "429" in err_str:
+                if attempt < max_retries:
+                    wait = delay_seconds * attempt  # 10s, 20s, 30s
+                    logger.warning(f"Gemini error (attempt {attempt}/{max_retries}), retrying in {wait}s: {e}")
+                    time.sleep(wait)
+                    continue
+            # တခြား error ဆိုရင် ချက်ချင်း raise
+            raise e
+    raise last_error
+
+
 def extract_analytics_from_report(report_text, group_type):
     """Gemini ကို သုံးပြီး report ထဲက structured data ထုတ်မယ်"""
     try:
@@ -356,8 +379,7 @@ Report ပေါင်းများနေရင် designs တွေ အကု
 Report:
 {report_text}"""
 
-        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        text = response.text.strip()
+        text = gemini_generate_with_retry(prompt).strip()
         # JSON ထုတ်မယ်
         text = re.sub(r'```json|```', '', text).strip()
         parsed = json.loads(text)
@@ -435,8 +457,7 @@ OPERATOR REPORTS:
 {report_text}
 {manager_section}"""
 
-        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        return response.text
+        return gemini_generate_with_retry(prompt)
     except Exception as e:
         logger.error(f"Daily summary error: {e}")
         return f"Summary error: {e}"
@@ -488,8 +509,7 @@ FRONT OFFICE DATA:
 DESIGN DATA:
 {json.dumps(design_data, ensure_ascii=False, indent=2)}"""
 
-        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        return response.text
+        return gemini_generate_with_retry(prompt)
     except Exception as e:
         logger.error(f"Weekly summary error: {e}")
         return f"Weekly summary error: {e}"
@@ -638,9 +658,7 @@ Format:
 
 💡 Overall Summary & Recommendations"""
 
-        gemini = genai.Client(api_key=GEMINI_API_KEY)
-        response = gemini.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        summary = response.text
+        summary = gemini_generate_with_retry(prompt)
 
         max_len = 4000
         if len(summary) <= max_len:
