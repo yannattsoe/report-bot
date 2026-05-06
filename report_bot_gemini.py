@@ -100,6 +100,45 @@ def get_leave_sheet():
     return gspread_client.open_by_key(LEAVE_SPREADSHEET_ID)
 
 
+def setup_report_names():
+    """Bot startup မှာ Employees sheet မှာ Report_Name column + data ထည့်မယ်"""
+    try:
+        if not LEAVE_SPREADSHEET_ID:
+            return
+        sheet = get_leave_sheet()
+        ws = sheet.worksheet("Employees")
+        headers = ws.row_values(1)
+
+        # Report_Name column မရှိရင် ထည့်မယ်
+        if "Report_Name" not in headers:
+            col = len(headers) + 1
+            ws.update_cell(1, col, "Report_Name")
+            headers.append("Report_Name")
+            logger.info("Added Report_Name column to Employees sheet")
+
+        # ကြိုတင် သတ်မှတ်ထားတဲ့ report names
+        report_names = {
+            "Myat Min Mg": "Myat min maung",
+            "Min Khant MG MG": "Min Khant",
+            "ခင်မို့မို့ထက်": "Thar",
+            "ဝါဝါ": "War War",
+            "Chitko": "Chit ko",
+        }
+
+        records = ws.get_all_records()
+        report_name_col = headers.index("Report_Name") + 1
+
+        for i, r in enumerate(records):
+            name = r.get("Name", "")
+            current = str(r.get("Report_Name", "")).strip()
+            if name in report_names and not current:
+                ws.update_cell(i + 2, report_name_col, report_names[name])
+                logger.info(f"Set Report_Name: {name} -> {report_names[name]}")
+
+    except Exception as e:
+        logger.error(f"Setup report names error: {e}")
+
+
 def get_employees_by_group():
     """Leave bot Employees sheet ကနေ group တစ်ခုချင်း ဝန်ထမ်းစာရင်း ဖတ်မယ်"""
     try:
@@ -113,13 +152,16 @@ def get_employees_by_group():
             group = str(r.get("Group", "")).strip().lower()
             if not group:
                 continue
-            # comma ခွဲထားတဲ့ multi-group handle မယ်
             groups = [g.strip() for g in group.split(",")]
+            name = r.get("Name", "")
+            # Report_Name ရှိရင် သုံးမယ်၊ မရှိရင် Name သုံးမယ်
+            report_name = str(r.get("Report_Name", "")).strip() or name
             for g in groups:
                 if g not in result:
                     result[g] = []
                 result[g].append({
-                    "name": r.get("Name", ""),
+                    "name": name,
+                    "report_name": report_name,
                     "telegram_id": str(r.get("Telegram_ID", "")).strip(),
                     "username": str(r.get("Telegram_Username", "")).strip().lower().lstrip("@")
                 })
@@ -856,6 +898,8 @@ async def send_report_reminder(context: ContextTypes.DEFAULT_TYPE):
         for emp in employees:
             emp_name = emp["name"]
             emp_name_lower = emp_name.strip().lower()
+            # Report_Name ရှိရင် သုံးမယ်၊ မရှိရင် Name သုံးမယ်
+            emp_report_name = emp.get("report_name", emp_name).strip().lower()
             emp_id = emp["telegram_id"]
             emp_uname = emp.get("username", "").strip().lower()
 
@@ -863,22 +907,22 @@ async def send_report_reminder(context: ContextTypes.DEFAULT_TYPE):
             by_id = (group_type, emp_id) in reported_ids
 
             # 2. Username + report name နဲ့ match
-            # Same username ၂ ခါ တင်ရင် report ထဲက နာမည် ဖတ်မယ်
             by_username = False
             if emp_uname:
                 uname_key = (group_type, emp_uname)
                 names_from_username = username_to_names.get(uname_key, set())
-                if emp_name_lower in names_from_username:
-                    # username ကနေ ဒီ employee ရဲ့ နာမည် တွေ့တယ်
+                if emp_report_name in names_from_username or emp_name_lower in names_from_username:
                     by_username = True
                 elif len(names_from_username) == 1:
-                    # username တစ်ခုတည်း တစ်ကြိမ်ပဲ တင်ရင် ဒီ employee ဆိုပြီး မှတ်မယ်
                     by_username = True
 
-            # 3. Report name fallback (case-insensitive)
+            # 3. Report_Name နဲ့ match (case-insensitive)
+            by_report_name = (group_type, emp_report_name) in reported_users
+
+            # 4. Name fallback (case-insensitive)
             by_name = (group_type, emp_name_lower) in reported_users
 
-            reported = by_id or by_username or by_name
+            reported = by_id or by_username or by_report_name or by_name
 
             # leave check (case-insensitive)
             on_leave = any(emp_name_lower == l.strip().lower() for l in on_leave_today)
@@ -929,6 +973,9 @@ def main():
         time=weekly_time,
         days=(5,)  # Saturday
     )
+
+    # Startup မှာ Employees sheet Report_Name column setup လုပ်မယ်
+    setup_report_names()
 
     logger.info("Report Bot started!")
     app.run_polling()
