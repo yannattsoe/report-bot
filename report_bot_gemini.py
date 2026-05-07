@@ -715,18 +715,19 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Group တစ်ခုချင်း report အကုန် တစ်ခါတည်း Gemini ကို ပို့မယ်
+    # တစ်ယောက်ချင်း သီးခြား analytics ထုတ်ပြီး သိမ်းမယ်
     for group_type, reports in reports_by_group.items():
         if not reports:
             continue
         # Manager reports ကို skip မယ် — analytics မထုတ်ဘူး
         if group_type.startswith("manager_"):
             continue
-        try:
-            all_reports_text = "\n\n---\n\n".join([f"{r['user']} ({r['time']}):\n{r['text']}" for r in reports])
-            analytics = extract_analytics_from_report(all_reports_text, group_type)
-            if analytics:
-                operator = analytics.get("operator", group_type)
+        for report in reports:
+            try:
+                analytics = extract_analytics_from_report(report["text"], group_type)
+                if not analytics:
+                    continue
+                operator = analytics.get("operator", report.get("user", group_type))
                 if group_type == "production":
                     save_analytics(today, group_type, operator,
                         analytics.get("jobs_completed", []),
@@ -742,15 +743,14 @@ async def send_daily_summary(context: ContextTypes.DEFAULT_TYPE):
                         analytics.get("issues", ""),
                         [])
                 elif group_type == "designer":
-                    # col3=Designs_Completed, col4=Revisions, col5=Designs_Pending, col7=Priority_Tomorrow
                     save_analytics(today, group_type, operator,
                         analytics.get("designs_completed", []),
                         analytics.get("revisions", []),
                         analytics.get("designs_pending", []),
                         "",
                         analytics.get("priority_tomorrow", []))
-        except Exception as e:
-            logger.error(f"Analytics error for {group_type}: {e}")
+            except Exception as e:
+                logger.error(f"Analytics error for {group_type}: {e}")
 
     # Manager report ရှာမယ် — memory မှာ မရှိရင် Sheet ကနေ ဖတ်မယ်
     manager_data = {}
