@@ -2,3 +2,4 @@ python-telegram-bot[job-queue]
 google-genai
 gspread
 google-auth
+flask

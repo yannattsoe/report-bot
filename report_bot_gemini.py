@@ -847,35 +847,32 @@ async def send_report_reminder(context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now(MYANMAR_TZ).strftime("%Y-%m-%d")
 
     # ဒီနေ့ report တင်ပြီးသူ ရှာမယ်
+    reported_ids = set()
+    reported_users = set()
+    username_to_names = {}
     try:
         sheet = get_sheet()
-        ws = sheet.worksheet("Raw_Reports")
-        records = ws.get_all_records()
-        reported_ids = set()        # Telegram ID match
-        reported_users = set()      # report ထဲက နာမည် match (case-insensitive)
-        username_to_names = {}      # username → [နာမည်တွေ] (တစ်နေ့တည်း ၂ ခါ တင်ရင်)
-
-        for r in records:
-            if str(r.get("Date", "")) == today and not str(r.get("Group", "")).startswith("manager_"):
-                uid = str(r.get("UserID", "")).strip()
-                grp = str(r.get("Group", ""))
-                uname = str(r.get("Username", "")).strip().lower()
-                rpt_name = str(r.get("User", "")).strip().lower()
-
-                if uid:
-                    reported_ids.add((grp, uid))
-
-                # username → report name mapping သိမ်းမယ်
-                if uname:
-                    key = (grp, uname)
-                    if key not in username_to_names:
-                        username_to_names[key] = set()
-                    username_to_names[key].add(rpt_name)
-
-                reported_users.add((grp, rpt_name))
+        try:
+            ws = sheet.worksheet("Raw_Reports")
+            records = ws.get_all_records()
+            for r in records:
+                if str(r.get("Date", "")) == today and not str(r.get("Group", "")).startswith("manager_"):
+                    uid = str(r.get("UserID", "")).strip()
+                    grp = str(r.get("Group", ""))
+                    uname = str(r.get("Username", "")).strip().lower()
+                    rpt_name = str(r.get("User", "")).strip().lower()
+                    if uid:
+                        reported_ids.add((grp, uid))
+                    if uname:
+                        key = (grp, uname)
+                        if key not in username_to_names:
+                            username_to_names[key] = set()
+                        username_to_names[key].add(rpt_name)
+                    reported_users.add((grp, rpt_name))
+        except gspread.exceptions.WorksheetNotFound:
+            logger.warning("Reminder - Raw_Reports sheet not found, proceeding with empty")
     except Exception as e:
         logger.error(f"Reminder - get raw reports error: {e}")
-        return
 
     # ဒီနေ့ leave ယူထားတဲ့သူ ရှာမယ် (reminder မပို့ဖို့)
     on_leave_today = set()
@@ -978,7 +975,7 @@ def main():
 
     # Report reminder: 5:15 PM Myanmar = 10:45 UTC (တနင်္လာ-သောကြာ ပဲ)
     reminder_time = time(hour=10, minute=45)
-    app.job_queue.run_daily(send_report_reminder, time=reminder_time, days=(0, 1, 2, 3, 4))
+    app.job_queue.run_daily(send_report_reminder, time=reminder_time, days=(0, 1, 2, 3, 4, 5))
 
     # Daily: 10:00 PM Myanmar = 15:30 UTC
     daily_time = time(hour=DAILY_HOUR_UTC, minute=DAILY_MINUTE_UTC)
@@ -999,5 +996,22 @@ def main():
     app.run_polling()
 
 
+def run_dashboard():
+    """Dashboard ကို background thread မှာ run မယ်"""
+    import threading
+    try:
+        from dashboard import app
+        port = int(os.environ.get("DASHBOARD_PORT", 8080))
+        thread = threading.Thread(
+            target=lambda: app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False),
+            daemon=True
+        )
+        thread.start()
+        logger.info(f"Dashboard started on port {port}")
+    except Exception as e:
+        logger.error(f"Dashboard start error: {e}")
+
+
 if __name__ == "__main__":
+    run_dashboard()
     main()
