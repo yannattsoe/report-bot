@@ -977,9 +977,9 @@ def main():
     reminder_time = time(hour=10, minute=45)
     app.job_queue.run_daily(send_report_reminder, time=reminder_time, days=(0, 1, 2, 3, 4, 5))
 
-    # Daily: 10:00 PM Myanmar = 15:30 UTC
+    # Daily: 10:00 PM Myanmar = 15:30 UTC (တနင်္လာ-စနေ ပဲ၊ တနင်္ဂနွေ မပါ)
     daily_time = time(hour=DAILY_HOUR_UTC, minute=DAILY_MINUTE_UTC)
-    app.job_queue.run_daily(send_daily_summary, time=daily_time)
+    app.job_queue.run_daily(send_daily_summary, time=daily_time, days=(0, 1, 2, 3, 4, 5))
 
     # Weekly: Saturday 1:00 PM Myanmar = Saturday 06:30 UTC
     weekly_time = time(hour=WEEKLY_HOUR_UTC, minute=WEEKLY_MINUTE_UTC)
